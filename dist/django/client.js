@@ -81,7 +81,7 @@ class DjangoAPIClient {
         return __awaiter(this, void 0, void 0, function* () {
             try {
                 const conversation = yield this.getConversation(conversationId);
-                return conversation.buyer_id === userId || conversation.seller_id === userId;
+                return conversation.tenantID === userId || conversation.ownerID === userId;
             }
             catch (error) {
                 console.error('Error checking message permission:', error);

@@ -118,7 +118,7 @@ io.on("connection", (socket) => {
                 console.log("⚠️ Receiver not found or not connected");
             }
             try {
-                yield (0, push_1.sendMessageNotification)(receiverID, senderName, text, conversationID, conversation.property_title);
+                yield (0, push_1.sendMessageNotification)(receiverID, senderName, text, conversationID, conversation.propertyName || "Property");
                 console.log("✅ Expo notifications sent to receiver");
             }
             catch (notificationError) {
@@ -159,12 +159,12 @@ io.on("connection", (socket) => {
     socket.on("createConversation", (_a) => __awaiter(void 0, [_a], void 0, function* ({ propertyId, buyerId, sellerId }) {
         try {
             const conversation = yield client_1.djangoClient.createConversation({
-                property_id: propertyId,
-                buyer_id: buyerId,
-                seller_id: sellerId,
+                propertyID: propertyId,
+                tenantID: buyerId,
+                ownerID: sellerId,
             });
             socket.emit("conversationCreated", conversation);
-            yield (0, push_1.sendNewConversationNotification)(sellerId, socket.username, "Property Inquiry", "New property inquiry received", conversation.id);
+            yield (0, push_1.sendNewConversationNotification)(sellerId, socket.username, conversation.propertyName || "Property Inquiry", "New property inquiry received", conversation.ID);
         }
         catch (error) {
             console.error("❌ Error creating conversation:", error);
@@ -182,7 +182,7 @@ io.on("connection", (socket) => {
             const participants = yield client_1.djangoClient.getConversationParticipants(conversationId);
             for (const participant of participants) {
                 if (participant.id !== socket.userID) {
-                    yield (0, push_1.sendMessageNotification)(participant.id, socket.username, `Appointment scheduled for ${appointmentDate}`, conversationId, conversation.property_title);
+                    yield (0, push_1.sendMessageNotification)(participant.id, socket.username, `Appointment scheduled for ${appointmentDate}`, conversationId, conversation.propertyName || "Property");
                 }
             }
             socket.emit("appointmentScheduled", {
@@ -208,7 +208,7 @@ io.on("connection", (socket) => {
             const participants = yield client_1.djangoClient.getConversationParticipants(conversationId);
             for (const participant of participants) {
                 if (participant.id !== socket.userID) {
-                    yield (0, push_1.sendMessageNotification)(participant.id, socket.username, `Document shared: ${documentName}`, conversationId, conversation.property_title);
+                    yield (0, push_1.sendMessageNotification)(participant.id, socket.username, `Document shared: ${documentName}`, conversationId, conversation.propertyName || "Property");
                 }
             }
             socket.emit("documentShared", {
