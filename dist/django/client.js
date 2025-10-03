@@ -20,7 +20,7 @@ class DjangoAPIClient {
             const url = `${this.baseURL}${endpoint}`;
             const headers = Object.assign({ 'Content-Type': 'application/json' }, options.headers);
             if (this.apiKey) {
-                headers['Authorization'] = `Bearer ${this.apiKey}`;
+                headers['Authorization'] = `JWT ${this.apiKey}`;
             }
             const response = yield fetch(url, Object.assign(Object.assign({}, options), { headers }));
             if (!response.ok) {

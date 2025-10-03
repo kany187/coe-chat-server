@@ -25,7 +25,6 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.createMessages = createMessages;
 exports.sendNotifications = sendNotifications;
-exports.sendNewConversationNotification = sendNewConversationNotification;
 exports.sendAppointmentNotification = sendAppointmentNotification;
 const push_1 = require("./push");
 const email_1 = require("./email");
@@ -81,31 +80,6 @@ function sendNotifications(messages_1, userId_1) {
         }
         catch (error) {
             console.error('Error sending notifications:', error);
-        }
-    });
-}
-function sendNewConversationNotification(userId, senderName, propertyTitle, messageText, conversationId) {
-    return __awaiter(this, void 0, void 0, function* () {
-        try {
-            const tokens = yield (0, push_1.getPushTokens)(userId);
-            const userPreferences = yield getUserNotificationPreferences(userId);
-            if (tokens && tokens.length > 0) {
-                const messages = tokens.map(token => ({
-                    token,
-                    title: `New inquiry about ${propertyTitle}`,
-                    body: `${senderName}: ${messageText}`,
-                    data: {
-                        conversationId: conversationId.toString(),
-                        senderName,
-                        type: 'new_conversation',
-                        propertyTitle
-                    }
-                }));
-                yield sendNotifications(messages, userId, 'new_conversation', userPreferences);
-            }
-        }
-        catch (error) {
-            console.error('Error sending new conversation notification:', error);
         }
     });
 }

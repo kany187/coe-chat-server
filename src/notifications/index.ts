@@ -1,4 +1,11 @@
-import { getPushTokens, sendPushNotification, sendBatchPushNotifications } from './push';
+import { 
+  getPushTokens, 
+  sendPushNotification, 
+  sendBatchPushNotifications,
+  sendNewConversationNotification,
+  sendMessageNotification,
+  setupReceiptValidation
+} from './push';
 import { sendEmailNotification } from './email';
 import { sendSMSNotification } from './sms';
 import { NotificationMessage, NotificationType, UserPreferences } from './types';
@@ -79,40 +86,6 @@ export async function sendNotifications(
   } catch (error) {
     console.error('Error sending notifications:', error);
     // Don't throw error to prevent breaking the message flow
-  }
-}
-
-/**
- * Send notification for new conversation
- */
-export async function sendNewConversationNotification(
-  userId: number,
-  senderName: string,
-  propertyTitle: string,
-  messageText: string,
-  conversationId: number
-): Promise<void> {
-  try {
-    const tokens = await getPushTokens(userId);
-    const userPreferences = await getUserNotificationPreferences(userId);
-    
-    if (tokens && tokens.length > 0) {
-      const messages = tokens.map(token => ({
-        token,
-        title: `New inquiry about ${propertyTitle}`,
-        body: `${senderName}: ${messageText}`,
-        data: {
-          conversationId: conversationId.toString(),
-          senderName,
-          type: 'new_conversation',
-          propertyTitle
-        }
-      }));
-
-      await sendNotifications(messages, userId, 'new_conversation', userPreferences);
-    }
-  } catch (error) {
-    console.error('Error sending new conversation notification:', error);
   }
 }
 

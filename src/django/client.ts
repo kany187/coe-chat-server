@@ -1,4 +1,4 @@
-import jwt from 'jsonwebtoken';
+import * as jwt from 'jsonwebtoken';
 
 export interface DjangoUser {
   id: number;
@@ -11,13 +11,21 @@ export interface DjangoUser {
 }
 
 export interface DjangoConversation {
-  id: number;
-  property_id: number;
-  buyer_id: number;
-  seller_id: number;
+  ID: number;
+  propertyID: number;
+  tenantID: number;
+  ownerID: number;
   created_at: string;
   updated_at: string;
-  property_title?: string;
+  propertyName?: string;
+  street?: string;
+  city?: string;
+  state?: string;
+  tenantFirstName?: string;
+  tenantLastName?: string;
+  tenantEmail?: string;
+  recipientName?: string;
+  messages?: DjangoMessage[];
 }
 
 export interface DjangoMessage {
@@ -69,7 +77,7 @@ class DjangoAPIClient {
     };
 
     if (this.apiKey) {
-      headers['Authorization'] = `Bearer ${this.apiKey}`;
+      headers['Authorization'] = `JWT ${this.apiKey}`;
     }
 
     const response = await fetch(url, {
@@ -158,7 +166,7 @@ class DjangoAPIClient {
   async canSendMessage(userId: number, conversationId: number): Promise<boolean> {
     try {
       const conversation = await this.getConversation(conversationId);
-      return conversation.buyer_id === userId || conversation.seller_id === userId;
+      return conversation.tenantID === userId || conversation.ownerID === userId;
     } catch (error) {
       console.error('Error checking message permission:', error);
       return false;
@@ -176,9 +184,9 @@ class DjangoAPIClient {
    * Create new conversation
    */
   async createConversation(conversationData: {
-    property_id: number;
-    buyer_id: number;
-    seller_id: number;
+    propertyID: number;
+    tenantID: number;
+    ownerID: number;
   }): Promise<DjangoConversation> {
     return this.makeRequest<DjangoConversation>('/api/conversations/', {
       method: 'POST',

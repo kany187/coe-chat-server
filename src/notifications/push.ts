@@ -1,4 +1,10 @@
+import { Expo, ExpoPushMessage, ExpoPushTicket } from "expo-server-sdk";
 import { NotificationMessage, PushNotificationPayload } from './types';
+import { djangoClient } from '../django/client';
+
+// Initialize Expo SDK
+const expo = new Expo();
+const tickets: ExpoPushTicket[] = [];
 
 export interface PushProvider {
   sendPushNotification(message: NotificationMessage): Promise<{ success: boolean; messageId?: string; error?: string }>;
@@ -279,7 +285,6 @@ export async function sendBatchPushNotifications(messages: NotificationMessage[]
 // Helper function to get push tokens for a user from Django
 export async function getPushTokens(userId: number): Promise<string[]> {
   try {
-    const { djangoClient } = await import('../django/client');
     const tokens = await djangoClient.getPushTokens(userId);
     return tokens.map(token => token.token);
   } catch (error) {
@@ -287,3 +292,218 @@ export async function getPushTokens(userId: number): Promise<string[]> {
     return [];
   }
 }
+
+/**
+ * Create Expo push messages from tokens and message data
+ */
+export const createMessages = (
+  pushTokens: string[],
+  body: string,
+  conversationID: number,
+  senderName: string,
+  propertyTitle?: string
+): ExpoPushMessage[] => {
+  const messages: ExpoPushMessage[] = [];
+  
+  for (const token of pushTokens) {
+    // Validate Expo push token
+    if (!Expo.isExpoPushToken(token)) {
+      console.error(`Push token ${token} is not a valid Expo push token`);
+      continue;
+    }
+
+    messages.push({
+      to: token,
+      sound: "default",
+      body,
+      title: senderName,
+      // Deep link to conversation
+      data: {
+        url: `exp://${process.env.EXPO_DEV_SERVER || '192.168.30.24:19000'}/--/messages/${conversationID}/${senderName}`,
+        conversationId: conversationID.toString(),
+        senderName,
+        propertyTitle: propertyTitle || '',
+        type: 'message'
+      },
+    });
+  }
+
+  return messages;
+};
+
+/**
+ * Send push notifications using Expo SDK
+ */
+export const sendNotifications = async (messages: ExpoPushMessage[]): Promise<void> => {
+  if (messages.length === 0) {
+    return;
+  }
+
+  try {
+    // Chunk notifications for better performance
+    const chunks = expo.chunkPushNotifications(messages);
+    
+    // Send chunks sequentially to avoid rate limits
+    for (const chunk of chunks) {
+      try {
+        const ticketChunk = await expo.sendPushNotificationsAsync(chunk);
+        console.log('Push notification tickets:', ticketChunk);
+        tickets.push(...ticketChunk);
+        
+        // Handle individual ticket errors
+        for (const ticket of ticketChunk) {
+          if (ticket.status === 'error') {
+            console.error('Push notification error:', ticket.details?.error);
+          }
+        }
+      } catch (error) {
+        console.error('Error sending push notification chunk:', error);
+      }
+    }
+  } catch (error) {
+    console.error('Error in sendNotifications:', error);
+  }
+};
+
+/**
+ * Validate push notification receipts
+ * Should be called periodically (e.g., every 30 minutes)
+ */
+export const validateReceipts = async (): Promise<void> => {
+  const receiptIds: string[] = [];
+  
+  // Collect receipt IDs from tickets
+  for (const ticket of tickets) {
+    if (ticket.status === 'ok' && ticket.id) {
+      receiptIds.push(ticket.id);
+    }
+  }
+
+  if (receiptIds.length === 0) {
+    return;
+  }
+
+  try {
+    // Chunk receipt IDs
+    const receiptIdChunks = expo.chunkPushNotificationReceiptIds(receiptIds);
+    
+    // Process receipt chunks
+    for (const chunk of receiptIdChunks) {
+      try {
+        const receipts = await expo.getPushNotificationReceiptsAsync(chunk);
+        console.log('Push notification receipts:', receipts);
+
+        // Handle receipt status
+        for (const receiptId in receipts) {
+          const { status, details } = receipts[receiptId];
+          
+          if (status === 'ok') {
+            console.log(`Push notification ${receiptId} delivered successfully`);
+          } else if (status === 'error') {
+            console.error(`Push notification ${receiptId} failed:`, details?.error);
+            
+            // Handle specific error codes
+            if (details?.error) {
+              switch (details.error) {
+                case 'DeviceNotRegistered':
+                  console.log('Device token is no longer valid, should be removed from database');
+                  break;
+                case 'MessageTooBig':
+                  console.log('Message payload is too large');
+                  break;
+                case 'MessageRateExceeded':
+                  console.log('Message rate exceeded, should retry later');
+                  break;
+                default:
+                  console.log(`Unknown error: ${details.error}`);
+              }
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error processing receipt chunk:', error);
+      }
+    }
+  } catch (error) {
+    console.error('Error validating receipts:', error);
+  }
+};
+
+/**
+ * Send notification for new conversation
+ */
+export const sendNewConversationNotification = async (
+  userID: number,
+  senderName: string,
+  propertyTitle: string,
+  messageText: string,
+  conversationID: number
+): Promise<void> => {
+  try {
+    const tokens = await getPushTokens(userID);
+    
+    if (tokens.length === 0) {
+      console.log('No push tokens found for user:', userID);
+      return;
+    }
+
+    const messages = createMessages(
+      tokens,
+      messageText,
+      conversationID,
+      senderName,
+      propertyTitle
+    );
+
+    await sendNotifications(messages);
+    console.log(`New conversation notification sent to user ${userID}`);
+  } catch (error) {
+    console.error('Error sending new conversation notification:', error);
+  }
+};
+
+/**
+ * Send notification for new message
+ */
+export const sendMessageNotification = async (
+  userID: number,
+  senderName: string,
+  messageText: string,
+  conversationID: number,
+  propertyTitle?: string
+): Promise<void> => {
+  try {
+    const tokens = await getPushTokens(userID);
+    
+    if (tokens.length === 0) {
+      console.log('No push tokens found for user:', userID);
+      return;
+    }
+
+    const messages = createMessages(
+      tokens,
+      messageText,
+      conversationID,
+      senderName,
+      propertyTitle
+    );
+
+    await sendNotifications(messages);
+    console.log(`Message notification sent to user ${userID}`);
+  } catch (error) {
+    console.error('Error sending message notification:', error);
+  }
+};
+
+/**
+ * Setup periodic receipt validation
+ * Call this once when the server starts
+ */
+export const setupReceiptValidation = (): void => {
+  // Validate receipts every 30 minutes
+  setInterval(() => {
+    validateReceipts();
+  }, 30 * 60 * 1000); // 30 minutes
+
+  console.log('Receipt validation scheduled every 30 minutes');
+};

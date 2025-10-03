@@ -1,37 +1,4 @@
 "use strict";
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
@@ -42,10 +9,15 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.setupReceiptValidation = exports.sendMessageNotification = exports.sendNewConversationNotification = exports.validateReceipts = exports.sendNotifications = exports.createMessages = void 0;
 exports.createPushProvider = createPushProvider;
 exports.sendPushNotification = sendPushNotification;
 exports.sendBatchPushNotifications = sendBatchPushNotifications;
 exports.getPushTokens = getPushTokens;
+const expo_server_sdk_1 = require("expo-server-sdk");
+const client_1 = require("../django/client");
+const expo = new expo_server_sdk_1.Expo();
+const tickets = [];
 class FirebasePushProvider {
     constructor() {
         this.serverKey = process.env.FIREBASE_SERVER_KEY || '';
@@ -291,8 +263,7 @@ function sendBatchPushNotifications(messages) {
 function getPushTokens(userId) {
     return __awaiter(this, void 0, void 0, function* () {
         try {
-            const { djangoClient } = yield Promise.resolve().then(() => __importStar(require('../django/client')));
-            const tokens = yield djangoClient.getPushTokens(userId);
+            const tokens = yield client_1.djangoClient.getPushTokens(userId);
             return tokens.map(token => token.token);
         }
         catch (error) {
@@ -301,3 +272,145 @@ function getPushTokens(userId) {
         }
     });
 }
+const createMessages = (pushTokens, body, conversationID, senderName, propertyTitle) => {
+    const messages = [];
+    for (const token of pushTokens) {
+        if (!expo_server_sdk_1.Expo.isExpoPushToken(token)) {
+            console.error(`Push token ${token} is not a valid Expo push token`);
+            continue;
+        }
+        messages.push({
+            to: token,
+            sound: "default",
+            body,
+            title: senderName,
+            data: {
+                url: `exp://${process.env.EXPO_DEV_SERVER || '192.168.30.24:19000'}/--/messages/${conversationID}/${senderName}`,
+                conversationId: conversationID.toString(),
+                senderName,
+                propertyTitle: propertyTitle || '',
+                type: 'message'
+            },
+        });
+    }
+    return messages;
+};
+exports.createMessages = createMessages;
+const sendNotifications = (messages) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
+    if (messages.length === 0) {
+        return;
+    }
+    try {
+        const chunks = expo.chunkPushNotifications(messages);
+        for (const chunk of chunks) {
+            try {
+                const ticketChunk = yield expo.sendPushNotificationsAsync(chunk);
+                console.log('Push notification tickets:', ticketChunk);
+                tickets.push(...ticketChunk);
+                for (const ticket of ticketChunk) {
+                    if (ticket.status === 'error') {
+                        console.error('Push notification error:', (_a = ticket.details) === null || _a === void 0 ? void 0 : _a.error);
+                    }
+                }
+            }
+            catch (error) {
+                console.error('Error sending push notification chunk:', error);
+            }
+        }
+    }
+    catch (error) {
+        console.error('Error in sendNotifications:', error);
+    }
+});
+exports.sendNotifications = sendNotifications;
+const validateReceipts = () => __awaiter(void 0, void 0, void 0, function* () {
+    const receiptIds = [];
+    for (const ticket of tickets) {
+        if (ticket.status === 'ok' && ticket.id) {
+            receiptIds.push(ticket.id);
+        }
+    }
+    if (receiptIds.length === 0) {
+        return;
+    }
+    try {
+        const receiptIdChunks = expo.chunkPushNotificationReceiptIds(receiptIds);
+        for (const chunk of receiptIdChunks) {
+            try {
+                const receipts = yield expo.getPushNotificationReceiptsAsync(chunk);
+                console.log('Push notification receipts:', receipts);
+                for (const receiptId in receipts) {
+                    const { status, details } = receipts[receiptId];
+                    if (status === 'ok') {
+                        console.log(`Push notification ${receiptId} delivered successfully`);
+                    }
+                    else if (status === 'error') {
+                        console.error(`Push notification ${receiptId} failed:`, details === null || details === void 0 ? void 0 : details.error);
+                        if (details === null || details === void 0 ? void 0 : details.error) {
+                            switch (details.error) {
+                                case 'DeviceNotRegistered':
+                                    console.log('Device token is no longer valid, should be removed from database');
+                                    break;
+                                case 'MessageTooBig':
+                                    console.log('Message payload is too large');
+                                    break;
+                                case 'MessageRateExceeded':
+                                    console.log('Message rate exceeded, should retry later');
+                                    break;
+                                default:
+                                    console.log(`Unknown error: ${details.error}`);
+                            }
+                        }
+                    }
+                }
+            }
+            catch (error) {
+                console.error('Error processing receipt chunk:', error);
+            }
+        }
+    }
+    catch (error) {
+        console.error('Error validating receipts:', error);
+    }
+});
+exports.validateReceipts = validateReceipts;
+const sendNewConversationNotification = (userID, senderName, propertyTitle, messageText, conversationID) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const tokens = yield getPushTokens(userID);
+        if (tokens.length === 0) {
+            console.log('No push tokens found for user:', userID);
+            return;
+        }
+        const messages = (0, exports.createMessages)(tokens, messageText, conversationID, senderName, propertyTitle);
+        yield (0, exports.sendNotifications)(messages);
+        console.log(`New conversation notification sent to user ${userID}`);
+    }
+    catch (error) {
+        console.error('Error sending new conversation notification:', error);
+    }
+});
+exports.sendNewConversationNotification = sendNewConversationNotification;
+const sendMessageNotification = (userID, senderName, messageText, conversationID, propertyTitle) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const tokens = yield getPushTokens(userID);
+        if (tokens.length === 0) {
+            console.log('No push tokens found for user:', userID);
+            return;
+        }
+        const messages = (0, exports.createMessages)(tokens, messageText, conversationID, senderName, propertyTitle);
+        yield (0, exports.sendNotifications)(messages);
+        console.log(`Message notification sent to user ${userID}`);
+    }
+    catch (error) {
+        console.error('Error sending message notification:', error);
+    }
+});
+exports.sendMessageNotification = sendMessageNotification;
+const setupReceiptValidation = () => {
+    setInterval(() => {
+        (0, exports.validateReceipts)();
+    }, 30 * 60 * 1000);
+    console.log('Receipt validation scheduled every 30 minutes');
+};
+exports.setupReceiptValidation = setupReceiptValidation;

@@ -7,13 +7,18 @@ import { djangoClient } from './django/client';
 import { 
   sendNotifications, 
   createMessages, 
-  sendNewConversationNotification 
-} from './notifications';
-import { getPushTokens } from './notifications/push';
+  sendNewConversationNotification,
+  sendMessageNotification,
+  setupReceiptValidation,
+  getPushTokens
+} from './notifications/push';
 import { config, validateConfig } from './config';
 
 // Validate configuration on startup
 validateConfig();
+
+// Setup receipt validation for push notifications
+setupReceiptValidation();
 
 const io = new Server({
     cors: {
@@ -166,24 +171,18 @@ io.on("connection", (socket) => {
           console.log("⚠️ Receiver not found or not connected");
         }
 
-        // Send notifications to receiver
+        // Send notifications to receiver using Expo SDK
         try {
-          const pushTokens = await getPushTokens(receiverID);
-          
-          if (pushTokens.length > 0) {
-            const messages = createMessages(
-              pushTokens,
-              text,
-              conversationID,
-              senderName,
-              conversation.property_title
-            );
-
-            await sendNotifications(messages, receiverID, 'message');
-            console.log("✅ Notifications sent to receiver");
-          }
+          await sendMessageNotification(
+            receiverID,
+            senderName,
+            text,
+            conversationID,
+            conversation.propertyName || "Property"
+          );
+          console.log("✅ Expo notifications sent to receiver");
         } catch (notificationError) {
-          console.error("❌ Error sending notifications:", notificationError);
+          console.error("❌ Error sending Expo notifications:", notificationError);
           // Don't fail the message sending if notifications fail
         }
 
@@ -224,7 +223,7 @@ io.on("connection", (socket) => {
     }
   });
 
-  // Create new conversation
+  // Create new conversation (Property Inquiry)
   socket.on("createConversation", async ({ 
     propertyId, 
     buyerId, 
@@ -236,25 +235,125 @@ io.on("connection", (socket) => {
   }) => {
     try {
       const conversation = await djangoClient.createConversation({
-        property_id: propertyId,
-        buyer_id: buyerId,
-        seller_id: sellerId,
+        propertyID: propertyId,
+        tenantID: buyerId,
+        ownerID: sellerId,
       });
       
       socket.emit("conversationCreated", conversation);
       
-      // Send notification to seller about new conversation
+      // Send notification to seller about new property inquiry
       await sendNewConversationNotification(
         sellerId,
         (socket as SessionSocket).username,
-        "Property Inquiry", // You might want to get the actual property title
-        "New conversation started",
-        conversation.id
+        conversation.propertyName || "Property Inquiry",
+        "New property inquiry received",
+        conversation.ID
       );
       
     } catch (error) {
       console.error("❌ Error creating conversation:", error);
       socket.emit("error", { message: "Failed to create conversation" });
+    }
+  });
+
+  // Schedule property viewing appointment
+  socket.on("scheduleAppointment", async ({
+    conversationId,
+    propertyId,
+    appointmentDate,
+    appointmentTime,
+    message
+  }: {
+    conversationId: number;
+    propertyId: number;
+    appointmentDate: string;
+    appointmentTime: string;
+    message: string;
+  }) => {
+    try {
+      // Save appointment message to conversation
+      const savedMessage = await djangoClient.saveMessage({
+        conversation_id: conversationId,
+        sender_id: (socket as SessionSocket).userID,
+        content: `Appointment scheduled for ${appointmentDate} at ${appointmentTime}. ${message}`,
+      });
+
+      // Notify all participants about the appointment
+      const conversation = await djangoClient.getConversation(conversationId);
+      const participants = await djangoClient.getConversationParticipants(conversationId);
+      
+      for (const participant of participants) {
+        if (participant.id !== (socket as SessionSocket).userID) {
+          await sendMessageNotification(
+            participant.id,
+            (socket as SessionSocket).username,
+            `Appointment scheduled for ${appointmentDate}`,
+            conversationId,
+            conversation.propertyName || "Property"
+          );
+        }
+      }
+
+      socket.emit("appointmentScheduled", {
+        messageId: savedMessage.id,
+        conversationId,
+        appointmentDate,
+        appointmentTime
+      });
+
+    } catch (error) {
+      console.error("❌ Error scheduling appointment:", error);
+      socket.emit("error", { message: "Failed to schedule appointment" });
+    }
+  });
+
+  // Share property documents
+  socket.on("shareDocument", async ({
+    conversationId,
+    documentUrl,
+    documentName,
+    documentType
+  }: {
+    conversationId: number;
+    documentUrl: string;
+    documentName: string;
+    documentType: string;
+  }) => {
+    try {
+      const savedMessage = await djangoClient.saveMessage({
+        conversation_id: conversationId,
+        sender_id: (socket as SessionSocket).userID,
+        content: `Shared document: ${documentName}`,
+      });
+
+      // Notify participants about document sharing
+      const conversation = await djangoClient.getConversation(conversationId);
+      const participants = await djangoClient.getConversationParticipants(conversationId);
+      
+      for (const participant of participants) {
+        if (participant.id !== (socket as SessionSocket).userID) {
+          await sendMessageNotification(
+            participant.id,
+            (socket as SessionSocket).username,
+            `Document shared: ${documentName}`,
+            conversationId,
+            conversation.propertyName || "Property"
+          );
+        }
+      }
+
+      socket.emit("documentShared", {
+        messageId: savedMessage.id,
+        conversationId,
+        documentUrl,
+        documentName,
+        documentType
+      });
+
+    } catch (error) {
+      console.error("❌ Error sharing document:", error);
+      socket.emit("error", { message: "Failed to share document" });
     }
   });
 
@@ -272,3 +371,5 @@ io.listen(config.server.port);
 console.log(`🚀 Congo Estate Chat Server listening on port ${config.server.port}`);
 console.log(`🌐 Environment: ${config.server.environment}`);
 console.log(`🔗 Django API: ${config.django.apiUrl}`);
+console.log(`📱 Real Estate Marketplace Chat System Ready`);
+console.log(`🏠 Property Inquiries | Agent Communication | Document Sharing`);
