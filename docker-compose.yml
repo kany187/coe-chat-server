@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  chat-server:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - DJANGO_API_URL=${DJANGO_API_URL:-http://localhost:8000}
+      - DJANGO_API_KEY=${DJANGO_API_KEY}
+      - PGHOST=${PGHOST:-127.0.0.1}
+      - PGUSER=${PGUSER:-kany}
+      - PGPASSWORD=${PGPASSWORD:-root}
+      - PGDATABASE=${PGDATABASE:-coe_db}
+      - PGPORT=${PGPORT:-5432}
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:19000}
+      - CORS_ORIGIN=${CORS_ORIGIN:-http://localhost:19000}
+    volumes:
+      - chat_logs:/app/logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  chat_logs:

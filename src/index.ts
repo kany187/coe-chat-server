@@ -1,6 +1,7 @@
 import { Server } from 'socket.io'
 import { v4 as uuidv4 } from "uuid";
 import jwt from "jsonwebtoken";
+import { createServer } from 'http';
 
 import { SessionSocket, JWT } from "./types";
 import { djangoClient } from './django/client';
@@ -56,13 +57,18 @@ io.use(async (socket, next) => {
   }
 
   const token = socket.handshake.auth.accessToken;
+  console.log('🔑 Received token:', token ? `${token.substring(0, 20)}...` : 'No token');
+  console.log('🔍 Auth object:', socket.handshake.auth);
+  
   if (!token) {
     return next(new Error("No access token provided"));
   }
 
   try {
     // Verify token with Django backend
+    console.log('🔍 Verifying token with Django backend...');
     const user = await djangoClient.verifyToken(token);
+    console.log('✅ Token verification successful for user:', user.id);
     
     const newSessionID = uuidv4();
     const newUserSocketID = uuidv4();
@@ -367,7 +373,48 @@ io.on("connection", (socket) => {
   });
 });
 
-io.listen(config.server.port);
+// Add HTTP server for health checks
+
+const httpServer = createServer(async (req, res) => {
+  if (req.url === '/health') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ 
+      status: 'healthy', 
+      timestamp: new Date().toISOString(),
+      uptime: process.uptime()
+    }));
+  } else if (req.url === '/health/db') {
+    try {
+      // Test database connection
+      const db = await import('./db/index');
+      const result = await db.default.query('SELECT NOW() as current_time, version() as db_version', []);
+      
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        status: 'healthy',
+        database: 'connected',
+        timestamp: new Date().toISOString(),
+        db_time: result.rows[0].current_time,
+        db_version: result.rows[0].db_version
+      }));
+    } catch (error) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        status: 'unhealthy',
+        database: 'disconnected',
+        error: error instanceof Error ? error.message : 'Unknown error',
+        timestamp: new Date().toISOString()
+      }));
+    }
+  } else {
+    res.writeHead(404);
+    res.end('Not Found');
+  }
+});
+
+io.listen(httpServer);
+httpServer.listen(config.server.port);
+
 console.log(`🚀 Congo Estate Chat Server listening on port ${config.server.port}`);
 console.log(`🌐 Environment: ${config.server.environment}`);
 console.log(`🔗 Django API: ${config.django.apiUrl}`);

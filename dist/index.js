@@ -11,6 +11,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
 Object.defineProperty(exports, "__esModule", { value: true });
 const socket_io_1 = require("socket.io");
 const uuid_1 = require("uuid");
+const http_1 = require("http");
 const client_1 = require("./django/client");
 const push_1 = require("./notifications/push");
 const config_1 = require("./config");
@@ -39,11 +40,15 @@ io.use((socket, next) => __awaiter(void 0, void 0, void 0, function* () {
         }
     }
     const token = socket.handshake.auth.accessToken;
+    console.log('🔑 Received token:', token ? `${token.substring(0, 20)}...` : 'No token');
+    console.log('🔍 Auth object:', socket.handshake.auth);
     if (!token) {
         return next(new Error("No access token provided"));
     }
     try {
+        console.log('🔍 Verifying token with Django backend...');
         const user = yield client_1.djangoClient.verifyToken(token);
+        console.log('✅ Token verification successful for user:', user.id);
         const newSessionID = (0, uuid_1.v4)();
         const newUserSocketID = (0, uuid_1.v4)();
         socket.sessionID = newSessionID;
@@ -233,7 +238,22 @@ io.on("connection", (socket) => {
         }
     });
 });
-io.listen(config_1.config.server.port);
+const httpServer = (0, http_1.createServer)((req, res) => {
+    if (req.url === '/health') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+            status: 'healthy',
+            timestamp: new Date().toISOString(),
+            uptime: process.uptime()
+        }));
+    }
+    else {
+        res.writeHead(404);
+        res.end('Not Found');
+    }
+});
+io.listen(httpServer);
+httpServer.listen(config_1.config.server.port);
 console.log(`🚀 Congo Estate Chat Server listening on port ${config_1.config.server.port}`);
 console.log(`🌐 Environment: ${config_1.config.server.environment}`);
 console.log(`🔗 Django API: ${config_1.config.django.apiUrl}`);

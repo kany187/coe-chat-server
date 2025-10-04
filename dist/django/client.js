@@ -12,15 +12,27 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.djangoClient = void 0;
 class DjangoAPIClient {
     constructor() {
-        this.baseURL = process.env.DJANGO_API_URL || 'http://localhost:8000';
-        this.apiKey = process.env.DJANGO_API_KEY;
+    }
+    getBaseURL() {
+        if (!this.baseURL) {
+            this.baseURL = process.env.DJANGO_API_URL || 'http://localhost:8000';
+            console.log('🔗 Django API URL:', this.baseURL);
+        }
+        return this.baseURL;
+    }
+    getApiKey() {
+        if (!this.apiKey) {
+            this.apiKey = process.env.DJANGO_API_KEY;
+        }
+        return this.apiKey;
     }
     makeRequest(endpoint_1) {
         return __awaiter(this, arguments, void 0, function* (endpoint, options = {}) {
-            const url = `${this.baseURL}${endpoint}`;
+            const url = `${this.getBaseURL()}${endpoint}`;
             const headers = Object.assign({ 'Content-Type': 'application/json' }, options.headers);
-            if (this.apiKey) {
-                headers['Authorization'] = `JWT ${this.apiKey}`;
+            const apiKey = this.getApiKey();
+            if (apiKey) {
+                headers['Authorization'] = `JWT ${apiKey}`;
             }
             const response = yield fetch(url, Object.assign(Object.assign({}, options), { headers }));
             if (!response.ok) {

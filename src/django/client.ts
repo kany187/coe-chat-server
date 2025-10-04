@@ -58,26 +58,41 @@ export interface DjangoPushToken {
 }
 
 class DjangoAPIClient {
-  private baseURL: string;
+  private baseURL?: string;
   private apiKey?: string;
 
   constructor() {
-    this.baseURL = process.env.DJANGO_API_URL || 'http://localhost:8000';
-    this.apiKey = process.env.DJANGO_API_KEY;
+    // Don't initialize here - will be done lazily
+  }
+
+  private getBaseURL(): string {
+    if (!this.baseURL) {
+      this.baseURL = process.env.DJANGO_API_URL || 'http://localhost:8000';
+      console.log('🔗 Django API URL:', this.baseURL);
+    }
+    return this.baseURL;
+  }
+
+  private getApiKey(): string | undefined {
+    if (!this.apiKey) {
+      this.apiKey = process.env.DJANGO_API_KEY;
+    }
+    return this.apiKey;
   }
 
   private async makeRequest<T>(
     endpoint: string,
     options: RequestInit = {}
   ): Promise<T> {
-    const url = `${this.baseURL}${endpoint}`;
+    const url = `${this.getBaseURL()}${endpoint}`;
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       ...(options.headers as Record<string, string>),
     };
 
-    if (this.apiKey) {
-      headers['Authorization'] = `JWT ${this.apiKey}`;
+    const apiKey = this.getApiKey();
+    if (apiKey) {
+      headers['Authorization'] = `JWT ${apiKey}`;
     }
 
     const response = await fetch(url, {
